@@ -1,0 +1,6 @@
+deltaflow-recommenations.md
+
+# Generated runtime logs
+logs/
+flavors/*/logs/
+*.log
