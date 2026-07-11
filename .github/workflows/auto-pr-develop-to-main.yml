@@ -14,7 +14,7 @@ jobs:
   ensure-pr:
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.AUTO_PR_TOKEN || secrets.GITHUB_TOKEN }}
     steps:
       - name: Check for existing open PR
         id: existing
@@ -60,12 +60,24 @@ jobs:
           EOF
           )
 
-          gh pr create \
+          set +e
+          CREATE_OUTPUT="$(gh pr create \
             --repo "${{ github.repository }}" \
             --base main \
             --head develop \
             --title "$TITLE" \
-            --body "$BODY"
+            --body "$BODY" 2>&1)"
+          CREATE_STATUS=$?
+          set -e
+
+          if [[ $CREATE_STATUS -ne 0 ]]; then
+            echo "$CREATE_OUTPUT"
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+            echo "failure_reason=pr-create-permission-or-validation" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "$CREATE_OUTPUT"
 
           PR_NUMBER="$(gh pr list \
             --repo "${{ github.repository }}" \
@@ -76,9 +88,10 @@ jobs:
             --jq '.[0].number')"
 
           echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "failed=false" >> "$GITHUB_OUTPUT"
 
       - name: Request Copilot review (best effort)
-        if: steps.existing.outputs.exists == 'false'
+        if: steps.existing.outputs.exists == 'false' && steps.create.outputs.failed != 'true'
         continue-on-error: true
         run: |
           gh pr edit "${{ steps.create.outputs.number }}" \
@@ -89,6 +102,8 @@ jobs:
         run: |
           if [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
             echo "No action needed. Existing PR: ${{ steps.existing.outputs.url }}"
+          elif [[ "${{ steps.create.outputs.failed }}" == "true" ]]; then
+            echo "PR was not created. If using GITHUB_TOKEN, enable Actions permission to create PRs, or set AUTO_PR_TOKEN secret with repo scope."
           else
             echo "Created PR #${{ steps.create.outputs.number }} for develop -> main"
           fi
