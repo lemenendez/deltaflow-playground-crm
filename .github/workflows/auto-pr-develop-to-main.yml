@@ -19,17 +19,21 @@ jobs:
       - name: Check for existing open PR
         id: existing
         run: |
-          PR_URL="$(gh pr list \
+          PR_JSON="$(gh pr list \
             --repo "${{ github.repository }}" \
             --base main \
             --head develop \
             --state open \
-            --json url \
-            --jq '.[0].url')"
+            --json number,url \
+            --jq '.[0]')"
+
+          PR_URL="$(jq -r '.url // empty' <<< "$PR_JSON")"
+          PR_NUMBER="$(jq -r '.number // empty' <<< "$PR_JSON")"
 
           if [[ -n "$PR_URL" ]]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "url=$PR_URL" >> "$GITHUB_OUTPUT"
+            echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
             echo "Open PR already exists: $PR_URL"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
@@ -41,7 +45,10 @@ jobs:
         id: create
         run: |
           TODAY="$(date +%Y-%m-%d)"
-          TITLE="Promote develop to main: polished sync for $TODAY"
+          HEAD_LINE="$(jq -r '.head_commit.message // "release sync"' "$GITHUB_EVENT_PATH" | head -n 1)"
+          COMMIT_COUNT="$(jq -r '(.commits // []) | length' "$GITHUB_EVENT_PATH")"
+          CLEAN_HEAD_LINE="$(echo "$HEAD_LINE" | tr -s ' ' | cut -c1-60)"
+          TITLE="Promote develop to main: $CLEAN_HEAD_LINE ($COMMIT_COUNT commits) - $TODAY"
 
           BODY=$(cat <<'EOF'
           ## Automated Promotion PR
@@ -90,6 +97,15 @@ jobs:
           echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "failed=false" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve target PR number
+        id: target
+        run: |
+          if [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
+            echo "number=${{ steps.existing.outputs.number }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ steps.create.outputs.failed }}" != "true" ]]; then
+            echo "number=${{ steps.create.outputs.number }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Request Copilot review (best effort)
         if: steps.existing.outputs.exists == 'false' && steps.create.outputs.failed != 'true'
         continue-on-error: true
@@ -97,6 +113,37 @@ jobs:
           gh pr edit "${{ steps.create.outputs.number }}" \
             --repo "${{ github.repository }}" \
             --add-reviewer "github-copilot[bot]"
+
+      - name: Comment latest push summary (best effort)
+        if: github.event_name == 'push' && steps.target.outputs.number != ''
+        continue-on-error: true
+        run: |
+          SHORT_SHA="$(jq -r '.after // ""' "$GITHUB_EVENT_PATH" | cut -c1-7)"
+          PUSHER="$(jq -r '.pusher.name // "unknown"' "$GITHUB_EVENT_PATH")"
+          COMPARE_URL="$(jq -r '.compare // ""' "$GITHUB_EVENT_PATH")"
+          NOW_UTC="$(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+
+          CHANGES="$(jq -r '
+            [(.commits // [])[]? | "- " + (.id[0:7]) + " " + ((.message | split("\\n")[0]) // "(no message)")] |
+            if length == 0 then "- (No commit details available in payload)" else join("\\n") end
+          ' "$GITHUB_EVENT_PATH")"
+
+          BODY=$(cat <<EOF
+          ## Push Summary
+
+          Latest push by **$PUSHER** on **develop** at **$NOW_UTC** (after: **$SHORT_SHA**).
+
+          ### Included commits
+          $CHANGES
+
+          ### Compare view
+          $COMPARE_URL
+          EOF
+          )
+
+          gh pr comment "${{ steps.target.outputs.number }}" \
+            --repo "${{ github.repository }}" \
+            --body "$BODY"
 
       - name: Summary
         run: |
