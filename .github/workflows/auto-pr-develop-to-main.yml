@@ -1,0 +1,94 @@
+name: Auto PR develop -> main
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ensure-pr:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check for existing open PR
+        id: existing
+        run: |
+          PR_URL="$(gh pr list \
+            --repo "${{ github.repository }}" \
+            --base main \
+            --head develop \
+            --state open \
+            --json url \
+            --jq '.[0].url')"
+
+          if [[ -n "$PR_URL" ]]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "url=$PR_URL" >> "$GITHUB_OUTPUT"
+            echo "Open PR already exists: $PR_URL"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No open PR found for develop -> main"
+          fi
+
+      - name: Create pull request
+        if: steps.existing.outputs.exists == 'false'
+        id: create
+        run: |
+          TODAY="$(date +%Y-%m-%d)"
+          TITLE="Promote develop to main: polished sync for $TODAY"
+
+          BODY=$(cat <<'EOF'
+          ## Automated Promotion PR
+
+          This PR was created automatically because a push landed on `develop` and no open PR to `main` existed.
+
+          ### What this does
+          - Keeps a single promotion PR from `develop` to `main`
+          - Avoids duplicate open PRs
+          - Requests Copilot review when available
+
+          ### Suggested checks before merge
+          - [ ] CI checks pass
+          - [ ] Changelog/release notes validated
+          - [ ] Manual smoke test completed
+          EOF
+          )
+
+          gh pr create \
+            --repo "${{ github.repository }}" \
+            --base main \
+            --head develop \
+            --title "$TITLE" \
+            --body "$BODY"
+
+          PR_NUMBER="$(gh pr list \
+            --repo "${{ github.repository }}" \
+            --base main \
+            --head develop \
+            --state open \
+            --json number \
+            --jq '.[0].number')"
+
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Request Copilot review (best effort)
+        if: steps.existing.outputs.exists == 'false'
+        continue-on-error: true
+        run: |
+          gh pr edit "${{ steps.create.outputs.number }}" \
+            --repo "${{ github.repository }}" \
+            --add-reviewer "github-copilot[bot]"
+
+      - name: Summary
+        run: |
+          if [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
+            echo "No action needed. Existing PR: ${{ steps.existing.outputs.url }}"
+          else
+            echo "Created PR #${{ steps.create.outputs.number }} for develop -> main"
+          fi
