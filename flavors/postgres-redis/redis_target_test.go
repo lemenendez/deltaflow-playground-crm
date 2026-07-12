@@ -61,7 +61,7 @@ func TestRedisTargetRetryThenSuccessRefreshesMetrics(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`
 SELECT COUNT(*)::bigint,
        COALESCE(SUM(total_cents), 0)::bigint,
-       COALESCE(AVG(total_cents::numeric), 0)::numeric
+       COALESCE(AVG(total_cents::numeric), 0)::double precision
 FROM playground_redis.crm_orders
 WHERE customer_id = $1`)).
 		WithArgs("cus-001").
@@ -70,7 +70,7 @@ WHERE customer_id = $1`)).
 	mock.ExpectQuery(regexp.QuoteMeta(`
 SELECT COUNT(*)::bigint,
        COALESCE(SUM(total_cents), 0)::bigint,
-       COALESCE(AVG(total_cents::numeric), 0)::numeric
+       COALESCE(AVG(total_cents::numeric), 0)::double precision
 FROM playground_redis.crm_orders`)).
 		WillReturnRows(sqlmock.NewRows([]string{"count", "total", "avg"}).AddRow(12, 75000, 6250.0))
 

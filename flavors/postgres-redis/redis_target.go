@@ -226,7 +226,7 @@ func (t *redisCRMTarget) loadMetricsByCustomer(ctx context.Context, customerID s
 	row := t.db.QueryRowContext(ctx, `
 SELECT COUNT(*)::bigint,
        COALESCE(SUM(total_cents), 0)::bigint,
-       COALESCE(AVG(total_cents::numeric), 0)::numeric
+       COALESCE(AVG(total_cents::numeric), 0)::double precision
 FROM playground_redis.crm_orders
 WHERE customer_id = $1`, customerID)
 
@@ -243,7 +243,7 @@ func (t *redisCRMTarget) loadGlobalMetrics(ctx context.Context) (orderMetrics, e
 	row := t.db.QueryRowContext(ctx, `
 SELECT COUNT(*)::bigint,
        COALESCE(SUM(total_cents), 0)::bigint,
-       COALESCE(AVG(total_cents::numeric), 0)::numeric
+       COALESCE(AVG(total_cents::numeric), 0)::double precision
 FROM playground_redis.crm_orders`)
 
 	var count int64
