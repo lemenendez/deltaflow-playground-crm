@@ -14,7 +14,7 @@ jobs:
   ensure-pr:
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.AUTO_PR_TOKEN || secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.AUTO_PR_TOKEN || github.token }}
     steps:
       - name: Check for existing open PR
         id: existing
@@ -81,7 +81,7 @@ jobs:
             echo "$CREATE_OUTPUT"
             echo "failed=true" >> "$GITHUB_OUTPUT"
             echo "failure_reason=pr-create-permission-or-validation" >> "$GITHUB_OUTPUT"
-            exit 0
+            exit 1
           fi
 
           echo "$CREATE_OUTPUT"
