@@ -234,13 +234,13 @@ func (t *elasticsearchCRMTarget) indexURL() string {
 }
 
 func (t *elasticsearchCRMTarget) documentURL(documentID string) string {
-	u, _ := url.Parse(t.indexURL() + "/_doc/" + url.PathEscape(documentID))
-	query := u.Query()
-	if t.refresh != "" {
-		query.Set("refresh", t.refresh)
+	base := t.indexURL() + "/_doc/" + url.PathEscape(documentID)
+	if t.refresh == "" {
+		return base
 	}
-	u.RawQuery = query.Encode()
-	return u.String()
+	query := url.Values{}
+	query.Set("refresh", t.refresh)
+	return base + "?" + query.Encode()
 }
 
 func closeResponse(resp *http.Response) error {
