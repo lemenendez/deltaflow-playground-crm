@@ -61,6 +61,29 @@ func main() {
 	printReport(result)
 }
 
+func actorName(actorID int) string {
+	if actorID >= 0 && actorID < len(baseActorNames) {
+		return baseActorNames[actorID]
+	}
+	return fmt.Sprintf("crm-actor-%d", actorID+1)
+}
+
+func buildSyncWorker(workerID string, jobStore *pgstore.JobStore, dispatchStore *pgstore.DispatchStore, projector deltaflow.Projector, applier deltaflow.ProjectionApplier) *deltaflow.SyncWorker {
+	// Keep worker construction visible in main to showcase DeltaFlow SyncWorker APIs.
+	return &deltaflow.SyncWorker{
+		JobStore:    jobStore,
+		Dispatcher:  dispatchStore,
+		Projector:   projector,
+		Applier:     applier,
+		SyncID:      syncID,
+		WorkerID:    workerID,
+		LockFor:     30 * time.Second,
+		PullSize:    0,
+		BatchSize:   workerBatchSize,
+		Concurrency: workerConcurrency,
+	}
+}
+
 func loadConfig() error {
 	var err error
 	if seed, err = hostpkg.EnvUint64("SIM_SEED", seed); err != nil {
@@ -104,27 +127,4 @@ func loadConfig() error {
 	}
 	elasticsearchEndpoint = os.Getenv("DELTAFLOW_ES_ENDPOINT")
 	return nil
-}
-
-func actorName(actorID int) string {
-	if actorID >= 0 && actorID < len(baseActorNames) {
-		return baseActorNames[actorID]
-	}
-	return fmt.Sprintf("crm-actor-%d", actorID+1)
-}
-
-func buildSyncWorker(workerID string, jobStore *pgstore.JobStore, dispatchStore *pgstore.DispatchStore, projector deltaflow.Projector, applier deltaflow.ProjectionApplier) *deltaflow.SyncWorker {
-	// Keep worker construction visible in main to showcase DeltaFlow SyncWorker APIs.
-	return &deltaflow.SyncWorker{
-		JobStore:    jobStore,
-		Dispatcher:  dispatchStore,
-		Projector:   projector,
-		Applier:     applier,
-		SyncID:      syncID,
-		WorkerID:    workerID,
-		LockFor:     30 * time.Second,
-		PullSize:    0,
-		BatchSize:   workerBatchSize,
-		Concurrency: workerConcurrency,
-	}
 }
