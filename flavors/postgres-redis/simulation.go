@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
 	hostpkg "github.com/lemenendez/deltaflow-playground-crm/internal/scenario/host"
+	pgstore "github.com/lemenendez/deltaflow/pkg/connectors/postgres"
 	deltaflow "github.com/lemenendez/deltaflow/pkg/deltaflow"
 )
 
@@ -38,9 +40,9 @@ type writerAck struct {
 	err   error
 }
 
-func buildScenario(ctx context.Context, stores *hostpkg.Stores) (*scenario, error) {
+func buildScenario(ctx context.Context, db *sql.DB) (*scenario, error) {
 	faker := gofakeit.New(seed)
-	source := newCRMStore(stores.DB)
+	source := newCRMStore(db)
 	if err := source.ensureSchema(ctx); err != nil {
 		return nil, err
 	}
@@ -194,7 +196,7 @@ func buildScenario(ctx context.Context, stores *hostpkg.Stores) (*scenario, erro
 	return &scenario{source: source, target: target, events: events}, nil
 }
 
-func runWriters(ctx context.Context, stores *hostpkg.Stores, source *crmStore, events []mutation) (writerRunResult, error) {
+func runWriters(ctx context.Context, db *sql.DB, deltaStore *pgstore.DeltaStore, source *crmStore, events []mutation) (writerRunResult, error) {
 	result := writerRunResult{Planned: len(events)}
 	actorEvents := make([][]mutation, writerCount)
 	for _, event := range events {
@@ -217,7 +219,7 @@ func runWriters(ctx context.Context, stores *hostpkg.Stores, source *crmStore, e
 				if runCtx.Err() != nil {
 					return
 				}
-				err := applyAndEnqueue(runCtx, stores, source, event)
+				err := applyAndEnqueue(runCtx, db, deltaStore, source, event)
 				ackCh <- writerAck{event: event, err: err}
 				if err != nil {
 					cancel()
@@ -260,8 +262,8 @@ func runWriters(ctx context.Context, stores *hostpkg.Stores, source *crmStore, e
 	return result, nil
 }
 
-func applyAndEnqueue(ctx context.Context, stores *hostpkg.Stores, source *crmStore, event mutation) error {
-	tx, err := stores.DB.BeginTx(ctx, nil)
+func applyAndEnqueue(ctx context.Context, db *sql.DB, deltaStore *pgstore.DeltaStore, source *crmStore, event mutation) error {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -277,7 +279,7 @@ func applyAndEnqueue(ctx context.Context, stores *hostpkg.Stores, source *crmSto
 	if event.Entity == "order" && event.Kind == "status" && event.Value == "accepted" {
 		origin = deltaflow.OriginOperationInserted
 	}
-	_, err = stores.DeltaStore.EnqueueInTx(ctx, tx, hostpkg.NewDelta(
+	_, err = deltaStore.EnqueueInTx(ctx, tx, hostpkg.NewDelta(
 		syncID,
 		event.Projection,
 		hostpkg.StringKey("id", event.EntityID),

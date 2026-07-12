@@ -7,6 +7,7 @@ import (
 	"time"
 
 	hostpkg "github.com/lemenendez/deltaflow-playground-crm/internal/scenario/host"
+	pgstore "github.com/lemenendez/deltaflow/pkg/connectors/postgres"
 	deltaflow "github.com/lemenendez/deltaflow/pkg/deltaflow"
 )
 
@@ -26,7 +27,9 @@ type demoResult struct {
 	WorkerLogPath   string
 }
 
-func runDemo(ctx context.Context, dsn string) (demoResult, error) {
+type workerFactory func(workerID string, jobStore *pgstore.JobStore, dispatchStore *pgstore.DispatchStore, projector deltaflow.Projector, target deltaflow.ProjectionApplier) *deltaflow.SyncWorker
+
+func runDemo(ctx context.Context, dsn string, makeWorker workerFactory) (demoResult, error) {
 	totalStart := time.Now()
 	setupStart := totalStart
 
@@ -37,20 +40,20 @@ func runDemo(ctx context.Context, dsn string) (demoResult, error) {
 	defer fileLogger.Close()
 	fileLogger.Logger.Info("playground_run_started", "sync_id", syncID, "scenario", "postgres-es")
 
-	stores, err := hostpkg.OpenStoresWithOptions(ctx, dsn, hostpkg.OpenStoresOptions{
+	db, deltaStore, jobStore, dispatchStore, err := hostpkg.OpenStoresWithOptions(ctx, dsn, hostpkg.OpenStoresOptions{
 		MaxAttempts: workerMaxAttempts,
 		LeaseLogger: fileLogger.Logger,
 	})
 	if err != nil {
 		return demoResult{}, err
 	}
-	defer stores.DB.Close()
+	defer db.Close()
 
-	if err := hostpkg.ResetSync(ctx, stores.DB, syncID); err != nil {
+	if err := hostpkg.ResetSync(ctx, db, syncID); err != nil {
 		return demoResult{}, err
 	}
 
-	scenario, err := buildScenario(ctx, stores)
+	scenario, err := buildScenario(ctx, db)
 	if err != nil {
 		return demoResult{}, err
 	}
@@ -67,8 +70,7 @@ func runDemo(ctx context.Context, dsn string) (demoResult, error) {
 			ctx,
 			1,
 			func(workerID string) *deltaflow.SyncWorker {
-				worker := hostpkg.MakeWorker(stores, syncID, workerID, projector, scenario.target, 0, workerBatchSize)
-				worker.Concurrency = workerConcurrency
+				worker := makeWorker(workerID, jobStore, dispatchStore, projector, scenario.target)
 				worker.Logger = fileLogger.Logger
 				return worker
 			},
@@ -76,10 +78,10 @@ func runDemo(ctx context.Context, dsn string) (demoResult, error) {
 				if !writersDone.Load() {
 					return false, nil
 				}
-				return hostpkg.WorkComplete(ctx, stores.DB, syncID)
+				return hostpkg.WorkComplete(ctx, db, syncID)
 			},
 			func(ctx context.Context) error {
-				return hostpkg.MakeRetryingAvailable(ctx, stores.DB, syncID)
+				return hostpkg.MakeRetryingAvailable(ctx, db, syncID)
 			},
 		)
 		workerStatsCh <- struct {
@@ -89,7 +91,7 @@ func runDemo(ctx context.Context, dsn string) (demoResult, error) {
 	}()
 
 	enqueueStart := time.Now()
-	writerResult, err := runWriters(ctx, stores, scenario.source, scenario.events)
+	writerResult, err := runWriters(ctx, db, deltaStore, scenario.source, scenario.events)
 	enqueueElapsed := time.Since(enqueueStart)
 	writersDone.Store(true)
 	if err != nil {
@@ -112,7 +114,7 @@ func runDemo(ctx context.Context, dsn string) (demoResult, error) {
 		return demoResult{}, workerResult.err
 	}
 
-	counts, err := hostpkg.CountJobs(ctx, stores.DB, syncID)
+	counts, err := hostpkg.CountJobs(ctx, db, syncID)
 	if err != nil {
 		return demoResult{}, err
 	}

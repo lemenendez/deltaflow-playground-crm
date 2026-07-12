@@ -9,6 +9,8 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	hostpkg "github.com/lemenendez/deltaflow-playground-crm/internal/scenario/host"
+	pgstore "github.com/lemenendez/deltaflow/pkg/connectors/postgres"
+	deltaflow "github.com/lemenendez/deltaflow/pkg/deltaflow"
 )
 
 const (
@@ -51,7 +53,7 @@ func main() {
 		dsn = hostpkg.DefaultDSN()
 	}
 
-	result, err := runDemo(ctx, dsn)
+	result, err := runDemo(ctx, dsn, buildSyncWorker)
 	if err != nil {
 		log.Fatalf("scenario failed: %v", err)
 	}
@@ -109,4 +111,20 @@ func actorName(actorID int) string {
 		return baseActorNames[actorID]
 	}
 	return fmt.Sprintf("crm-actor-%d", actorID+1)
+}
+
+func buildSyncWorker(workerID string, jobStore *pgstore.JobStore, dispatchStore *pgstore.DispatchStore, projector deltaflow.Projector, applier deltaflow.ProjectionApplier) *deltaflow.SyncWorker {
+	// Keep worker construction visible in main to showcase DeltaFlow SyncWorker APIs.
+	return &deltaflow.SyncWorker{
+		JobStore:    jobStore,
+		Dispatcher:  dispatchStore,
+		Projector:   projector,
+		Applier:     applier,
+		SyncID:      syncID,
+		WorkerID:    workerID,
+		LockFor:     30 * time.Second,
+		PullSize:    0,
+		BatchSize:   workerBatchSize,
+		Concurrency: workerConcurrency,
+	}
 }
