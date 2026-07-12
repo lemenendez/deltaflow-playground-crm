@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -322,85 +321,6 @@ func (s *crmStore) getOrder(ctx context.Context, id string) (order, bool, error)
 	}
 	o.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
 	return o, true, nil
-}
-
-type crmTargetSimulator struct {
-	mu          sync.Mutex
-	searchQueue []string
-	orderQueue  []string
-	failOnce    map[string]bool
-	deadLetters map[string]bool
-	upserts     int
-	deletes     int
-	failures    int
-}
-
-func newCRMTargetSimulator(failOnce map[string]bool, deadLetters map[string]bool) *crmTargetSimulator {
-	return &crmTargetSimulator{
-		failOnce:    failOnce,
-		deadLetters: deadLetters,
-	}
-}
-
-func (t *crmTargetSimulator) apply(_ context.Context, op deltaflow.ProjectionOperation) error {
-	id, err := hostpkg.StringFromKey(op.Identity.Key, "id")
-	if err != nil {
-		return err
-	}
-	queueKey := fmt.Sprintf("%s/%s", op.Identity.Type, id)
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	switch op.Type {
-	case deltaflow.ProjectionOpUpsert:
-		if op.Projection == nil {
-			return errors.New("upsert operation requires projection")
-		}
-		if t.deadLetters[queueKey] {
-			t.failures++
-			return fmt.Errorf("crm target rejected %s: invalid downstream payload", queueKey)
-		}
-		if t.failOnce[queueKey] {
-			delete(t.failOnce, queueKey)
-			t.failures++
-			return fmt.Errorf("target temporary timeout for %s", queueKey)
-		}
-		t.applyUpsert(op, id)
-		t.upserts++
-		return nil
-	case deltaflow.ProjectionOpDelete:
-		t.searchQueue = append(t.searchQueue, "delete:"+string(op.Identity.Type)+":"+id)
-		t.deletes++
-		return nil
-	default:
-		return fmt.Errorf("unsupported operation %q", op.Type)
-	}
-}
-
-func (t *crmTargetSimulator) applyUpsert(op deltaflow.ProjectionOperation, id string) {
-	switch op.Identity.Type {
-	case userProjection:
-		t.searchQueue = append(t.searchQueue, "upsert:user:"+id)
-	case custProjection:
-		t.searchQueue = append(t.searchQueue, "upsert:customer:"+id)
-	case orderProjection:
-		t.orderQueue = append(t.orderQueue, "publish:order:"+id)
-		t.searchQueue = append(t.searchQueue, "upsert:order:"+id)
-	}
-}
-
-func (t *crmTargetSimulator) Apply(ctx context.Context, op deltaflow.ProjectionOperation) error {
-	return t.apply(ctx, op)
-}
-
-func (t *crmTargetSimulator) snapshot(_ context.Context) ([]string, []string, map[string][]byte, int, int, int, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	searchQueue := append([]string(nil), t.searchQueue...)
-	orderQueue := append([]string(nil), t.orderQueue...)
-	return searchQueue, orderQueue, nil, t.upserts, t.deletes, t.failures, nil
 }
 
 type countingProjector struct {
