@@ -63,7 +63,6 @@ jobs:
           ### What this does
           - Keeps a single promotion PR from `develop` to `main`
           - Avoids duplicate open PRs
-          - Requests Copilot review when available
 
           ### Suggested checks before merge
           - [ ] CI checks pass
@@ -110,14 +109,6 @@ jobs:
           elif [[ "${{ steps.create.outputs.failed }}" != "true" ]]; then
             echo "number=${{ steps.create.outputs.number }}" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Request Copilot review (best effort)
-        if: steps.existing.outputs.exists == 'false' && steps.create.outputs.failed != 'true'
-        continue-on-error: true
-        run: |
-          gh pr edit "${{ steps.create.outputs.number }}" \
-            --repo "${{ github.repository }}" \
-            --add-reviewer "github-copilot[bot]"
 
       - name: Comment latest push summary (best effort)
         if: github.event_name == 'push' && steps.target.outputs.number != ''
