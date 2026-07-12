@@ -61,13 +61,15 @@ func runDemo(ctx context.Context, dsn string, makeWorker workerFactory) (demoRes
 	setupElapsed := time.Since(setupStart)
 
 	var writersDone atomic.Bool
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
 	workerStatsCh := make(chan struct {
 		stats hostpkg.WorkerLoopStats
 		err   error
 	}, 1)
 	go func() {
 		stats, err := hostpkg.RunWorkers(
-			ctx,
+			workerCtx,
 			1,
 			func(workerID string) *deltaflow.SyncWorker {
 				worker := makeWorker(workerID, jobStore, dispatchStore, projector, scenario.target)
@@ -95,10 +97,7 @@ func runDemo(ctx context.Context, dsn string, makeWorker workerFactory) (demoRes
 	enqueueElapsed := time.Since(enqueueStart)
 	writersDone.Store(true)
 	if err != nil {
-		select {
-		case <-workerStatsCh:
-		case <-ctx.Done():
-		}
+		workerCancel()
 		return demoResult{
 			Scenario:      scenario,
 			Enqueued:      writerResult.Enqueued,
