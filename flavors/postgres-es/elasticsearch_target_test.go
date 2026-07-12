@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	hostpkg "github.com/lemenendez/deltaflow-playground-crm/internal/scenario/host"
+	es "github.com/lemenendez/deltaflow/pkg/connectors/elasticsearch"
 	deltaflow "github.com/lemenendez/deltaflow/pkg/deltaflow"
 )
 
@@ -38,8 +40,18 @@ func TestElasticsearchCRMTargetRetryErrorNamesElasticsearch(t *testing.T) {
 	if err == nil {
 		t.Fatal("err = nil, want retry error")
 	}
-	if !strings.Contains(err.Error(), "elasticsearch temporary timeout") {
-		t.Fatalf("error = %q, want Elasticsearch retry message", err.Error())
+	var responseErr *es.ResponseError
+	if !errors.As(err, &responseErr) {
+		t.Fatalf("error = %T, want *elasticsearch.ResponseError", err)
+	}
+	if responseErr.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("StatusCode = %d, want %d", responseErr.StatusCode, http.StatusTooManyRequests)
+	}
+	if !responseErr.Retryable {
+		t.Fatal("Retryable = false, want true")
+	}
+	if !strings.Contains(responseErr.Body, "elasticsearch temporary timeout") {
+		t.Fatalf("body = %q, want temporary timeout text", responseErr.Body)
 	}
 }
 
