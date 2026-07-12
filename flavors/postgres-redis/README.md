@@ -41,6 +41,8 @@ Each key stores JSON with:
 - `total_cents`
 - `avg_total_cents`
 
+Metric key writes are delegated to DeltaFlow Redis connector `Applier.Apply`; custom code only computes aggregate payloads and simulation behavior.
+
 ## Run
 
 From this folder:

@@ -21,6 +21,7 @@ const (
 	redisMetricKeyField  = "metric_key"
 	redisCustomerKeyBase = "metrics:customer:"
 	redisGlobalKey       = "metrics:global:orders"
+	redisMetricTTL       = 0
 )
 
 type orderMetrics struct {
@@ -66,12 +67,13 @@ func newCRMTarget(_ context.Context, source *crmStore, failOnce map[string]bool,
 	}
 
 	client := redisclient.NewClient(&redisclient.Options{Addr: redisAddress})
+	keyFunc := func(identity deltaflow.ProjectionIdentity) (string, error) {
+		return hostpkg.StringFromKey(identity.Key, redisMetricKeyField)
+	}
 	applier, err := redisconnector.NewApplier(redisconnector.ApplierConfig{
-		Client: client,
-		KeyFunc: func(identity deltaflow.ProjectionIdentity) (string, error) {
-			return hostpkg.StringFromKey(identity.Key, redisMetricKeyField)
-		},
-		TTL: 0,
+		Client:  client,
+		KeyFunc: keyFunc,
+		TTL:     redisMetricTTL,
 	})
 	if err != nil {
 		return nil, err
@@ -87,25 +89,9 @@ func (t *redisCRMTarget) Apply(ctx context.Context, op deltaflow.ProjectionOpera
 	}
 	queueKey := fmt.Sprintf("%s/%s", op.Identity.Type, id)
 
-	t.state.mu.Lock()
-	if op.Type == deltaflow.ProjectionOpUpsert {
-		if op.Projection == nil {
-			t.state.mu.Unlock()
-			return errors.New("upsert operation requires projection")
-		}
-		if t.state.deadLetters[queueKey] {
-			t.state.failures++
-			t.state.mu.Unlock()
-			return fmt.Errorf("redis target rejected %s: invalid downstream payload", queueKey)
-		}
-		if t.state.failOnce[queueKey] {
-			delete(t.state.failOnce, queueKey)
-			t.state.failures++
-			t.state.mu.Unlock()
-			return fmt.Errorf("redis temporary timeout for %s", queueKey)
-		}
+	if err := t.applySimulationGuards(op, queueKey); err != nil {
+		return err
 	}
-	t.state.mu.Unlock()
 
 	if op.Identity.Type != orderProjection {
 		return nil
@@ -134,6 +120,28 @@ func (t *redisCRMTarget) Apply(ctx context.Context, op deltaflow.ProjectionOpera
 		t.state.ops = append(t.state.ops, "delete:order:"+id)
 		t.state.metricOps = append(t.state.metricOps, "refresh:global")
 		t.state.deletes++
+	}
+	return nil
+}
+
+func (t *redisCRMTarget) applySimulationGuards(op deltaflow.ProjectionOperation, queueKey string) error {
+	t.state.mu.Lock()
+	defer t.state.mu.Unlock()
+
+	if op.Type != deltaflow.ProjectionOpUpsert {
+		return nil
+	}
+	if op.Projection == nil {
+		return errors.New("upsert operation requires projection")
+	}
+	if t.state.deadLetters[queueKey] {
+		t.state.failures++
+		return fmt.Errorf("redis target rejected %s: invalid downstream payload", queueKey)
+	}
+	if t.state.failOnce[queueKey] {
+		delete(t.state.failOnce, queueKey)
+		t.state.failures++
+		return fmt.Errorf("redis temporary timeout for %s", queueKey)
 	}
 	return nil
 }
