@@ -185,7 +185,7 @@ func TestRedisTargetIgnoresNonOrderProjection(t *testing.T) {
 		Type: deltaflow.ProjectionOpUpsert,
 		Identity: deltaflow.ProjectionIdentity{
 			Type: userProjection,
-			Key:  hostpkg.StringKey("id", "usr-001"),
+			Key:  hostpkg.StringKey("user_id", "usr-001"),
 		},
 		Projection: &deltaflow.Projection{Payload: []byte(`{"id":"usr-001"}`), MediaType: "application/json"},
 	}

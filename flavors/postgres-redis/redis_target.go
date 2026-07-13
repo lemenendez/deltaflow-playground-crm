@@ -91,6 +91,10 @@ func newCRMTarget(ctx context.Context, source *crmStore, failOnce map[string]boo
 }
 
 func (t *redisCRMTarget) Apply(ctx context.Context, op deltaflow.ProjectionOperation) error {
+	if op.Identity.Type != orderProjection {
+		return nil
+	}
+
 	id, err := hostpkg.StringFromKey(op.Identity.Key, "id")
 	if err != nil {
 		return err
@@ -99,10 +103,6 @@ func (t *redisCRMTarget) Apply(ctx context.Context, op deltaflow.ProjectionOpera
 
 	if err := t.applySimulationGuards(op, queueKey); err != nil {
 		return err
-	}
-
-	if op.Identity.Type != orderProjection {
-		return nil
 	}
 
 	entries, err := t.metricEntriesForOperation(ctx, op)

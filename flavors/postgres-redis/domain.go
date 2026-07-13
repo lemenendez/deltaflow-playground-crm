@@ -257,10 +257,9 @@ func (s *crmStore) project(ctx context.Context, identity deltaflow.ProjectionIde
 			return projectionOrNotFound(err, ok)
 		}
 		return hostpkg.JSONProjection(identity, map[string]any{
-			"order_stream":        "orders:events",
-			"elasticsearch_index": "orders:index",
 			"order":               o,
-			"customer_cache_key":  "customer:" + o.CustomerID,
+			"customer_metric_key": redisCustomerKeyBase + o.CustomerID + ":orders",
+			"global_metric_key":   redisGlobalKey,
 		})
 	default:
 		return deltaflow.Projection{}, fmt.Errorf("unsupported projection type %q", identity.Type)
