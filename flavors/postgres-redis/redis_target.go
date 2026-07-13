@@ -56,7 +56,11 @@ type redisCRMTarget struct {
 	state   *redisStateSnapshot
 }
 
-func newCRMTarget(_ context.Context, source *crmStore, failOnce map[string]bool, deadLetters map[string]bool) (crmTarget, error) {
+var redisClientOptions = func(addr string) *redisclient.Options {
+	return &redisclient.Options{Addr: addr}
+}
+
+func newCRMTarget(ctx context.Context, source *crmStore, failOnce map[string]bool, deadLetters map[string]bool) (crmTarget, error) {
 	if source == nil || source.db == nil {
 		return nil, errors.New("redis target requires source db")
 	}
@@ -66,7 +70,11 @@ func newCRMTarget(_ context.Context, source *crmStore, failOnce map[string]bool,
 		return &redisCRMTarget{db: source.db, state: state}, nil
 	}
 
-	client := redisclient.NewClient(&redisclient.Options{Addr: redisAddress})
+	client := redisclient.NewClient(redisClientOptions(redisAddress))
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("connect to redis at %s: %w", redisAddress, err)
+	}
 	keyFunc := func(identity deltaflow.ProjectionIdentity) (string, error) {
 		return hostpkg.StringFromKey(identity.Key, redisMetricKeyField)
 	}
