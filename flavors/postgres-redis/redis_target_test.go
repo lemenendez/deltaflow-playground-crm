@@ -179,6 +179,40 @@ func TestRedisTargetDeadLetterUpsert(t *testing.T) {
 	}
 }
 
+func TestRedisTargetRejectsInvalidOrderPayloadBeforeMetrics(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	target := &redisCRMTarget{db: db, state: newRedisStateSnapshot(nil, nil)}
+	op := deltaflow.ProjectionOperation{
+		Type: deltaflow.ProjectionOpUpsert,
+		Identity: deltaflow.ProjectionIdentity{
+			Type: orderProjection,
+			Key:  hostpkg.StringKey("id", "ord-001"),
+		},
+		Projection: &deltaflow.Projection{Payload: []byte(`{"order":{}}`), MediaType: "application/json"},
+	}
+
+	err = target.Apply(context.Background(), op)
+	if err == nil {
+		t.Fatal("err = nil, want missing customer_id error")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, keys, upserts, deletes, failures, snapErr := target.snapshot(context.Background())
+	if snapErr != nil {
+		t.Fatal(snapErr)
+	}
+	if len(keys) != 0 || upserts != 0 || deletes != 0 || failures != 0 {
+		t.Fatalf("unexpected side effects keys=%d upserts=%d deletes=%d failures=%d", len(keys), upserts, deletes, failures)
+	}
+}
+
 func TestRedisTargetIgnoresNonOrderProjection(t *testing.T) {
 	target := &redisCRMTarget{state: newRedisStateSnapshot(nil, nil)}
 	op := deltaflow.ProjectionOperation{

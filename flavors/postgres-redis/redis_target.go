@@ -84,6 +84,7 @@ func newCRMTarget(ctx context.Context, source *crmStore, failOnce map[string]boo
 		TTL:     redisMetricTTL,
 	})
 	if err != nil {
+		_ = client.Close()
 		return nil, err
 	}
 
@@ -105,7 +106,15 @@ func (t *redisCRMTarget) Apply(ctx context.Context, op deltaflow.ProjectionOpera
 		return err
 	}
 
-	entries, err := t.metricEntriesForOperation(ctx, op)
+	customerID := ""
+	if op.Type == deltaflow.ProjectionOpUpsert {
+		customerID, err = customerIDFromOrderProjection(op.Projection.Payload)
+		if err != nil {
+			return err
+		}
+	}
+
+	entries, err := t.metricEntriesForOperation(ctx, op, customerID)
 	if err != nil {
 		return err
 	}
@@ -117,10 +126,6 @@ func (t *redisCRMTarget) Apply(ctx context.Context, op deltaflow.ProjectionOpera
 	defer t.state.mu.Unlock()
 	switch op.Type {
 	case deltaflow.ProjectionOpUpsert:
-		customerID, extractErr := customerIDFromOrderProjection(op.Projection.Payload)
-		if extractErr != nil {
-			return extractErr
-		}
 		t.state.ops = append(t.state.ops, "upsert:order:"+id)
 		t.state.metricOps = append(t.state.metricOps, "refresh:customer:"+customerID)
 		t.state.upserts++
@@ -154,13 +159,9 @@ func (t *redisCRMTarget) applySimulationGuards(op deltaflow.ProjectionOperation,
 	return nil
 }
 
-func (t *redisCRMTarget) metricEntriesForOperation(ctx context.Context, op deltaflow.ProjectionOperation) (map[string]orderMetrics, error) {
+func (t *redisCRMTarget) metricEntriesForOperation(ctx context.Context, op deltaflow.ProjectionOperation, customerID string) (map[string]orderMetrics, error) {
 	switch op.Type {
 	case deltaflow.ProjectionOpUpsert:
-		customerID, err := customerIDFromOrderProjection(op.Projection.Payload)
-		if err != nil {
-			return nil, err
-		}
 		customerMetrics, err := t.loadMetricsByCustomer(ctx, customerID)
 		if err != nil {
 			return nil, err
