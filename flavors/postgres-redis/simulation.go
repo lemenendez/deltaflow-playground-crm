@@ -103,14 +103,12 @@ func buildScenario(ctx context.Context, db *sql.DB) (*scenario, error) {
 		return nil, err
 	}
 
-	retryCustomerID := customerIDs[0]
-	if len(customerIDs) > 1 {
-		retryCustomerID = customerIDs[1]
-	}
-
+	orderIDs := sortedKeys(orders)
+	retryOrderID := orderIDs[0]
 	target, err := newCRMTarget(
 		ctx,
-		map[string]bool{string(custProjection) + "/" + retryCustomerID: true},
+		source,
+		map[string]bool{string(orderProjection) + "/" + retryOrderID: true},
 		map[string]bool{string(orderProjection) + "/" + deadOrderID: true},
 	)
 	if err != nil {
@@ -118,7 +116,6 @@ func buildScenario(ctx context.Context, db *sql.DB) (*scenario, error) {
 	}
 
 	events := make([]mutation, 0, mutationCount+3)
-	orderIDs := sortedKeys(orders)
 	entityCycle := []string{"user", "customer", "order", "customer", "order"}
 	for seq := 1; seq <= mutationCount; seq++ {
 		entity := entityCycle[(seq+faker.Number(0, len(entityCycle)-1))%len(entityCycle)]
@@ -169,11 +166,11 @@ func buildScenario(ctx context.Context, db *sql.DB) (*scenario, error) {
 	events = append(events, mutation{
 		Seq:        mutationCount + 1,
 		ActorID:    2,
-		Entity:     "customer",
-		EntityID:   retryCustomerID,
-		Kind:       "phone",
-		Value:      faker.Phone(),
-		Projection: custProjection,
+		Entity:     "order",
+		EntityID:   retryOrderID,
+		Kind:       "total",
+		Value:      faker.Number(1200, 120000),
+		Projection: orderProjection,
 		At:         fixedTime(mutationCount + 1),
 	})
 	events = append(events, mutation{
@@ -189,10 +186,10 @@ func buildScenario(ctx context.Context, db *sql.DB) (*scenario, error) {
 	events = append(events, mutation{
 		Seq:        mutationCount + 3,
 		ActorID:    0,
-		Entity:     "customer",
-		EntityID:   "cus-ghost-001",
+		Entity:     "order",
+		EntityID:   "ord-ghost-001",
 		Kind:       "ghost",
-		Projection: custProjection,
+		Projection: orderProjection,
 		At:         fixedTime(mutationCount + 3),
 	})
 

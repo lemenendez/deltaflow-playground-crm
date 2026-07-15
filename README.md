@@ -107,6 +107,23 @@ When optimizing for self-contained flavors:
 
 Paste the first code chunk and target flavor. The adaptation can then be done incrementally by splitting shared scenario logic from flavor-specific wiring.
 
+## GitHub Security Checklist
+
+Use this checklist to harden the repository configuration in GitHub after cloning or creating a new environment.
+
+- Enable Dependabot alerts
+- Enable Dependabot security updates
+- Enable Secret scanning
+- Enable Push protection for secrets
+- Enable Code scanning alerts (CodeQL)
+- Protect `main` branch
+- Require pull requests before merge
+- Require at least 1 approving review
+- Require status checks to pass before merge
+- Restrict direct pushes to `main`
+- Include administrators in branch protection rules (recommended)
+- Restrict who can dismiss pull request reviews (recommended)
+
 
 
 

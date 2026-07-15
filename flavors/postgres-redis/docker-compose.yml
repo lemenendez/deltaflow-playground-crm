@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: deltaflow
+      POSTGRES_USER: deltaflow
+      POSTGRES_PASSWORD: deltaflow
+    ports:
+      - "127.0.0.1:5436:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../../:/workspace:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deltaflow -d deltaflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7.4
+    ports:
+      - "127.0.0.1:6381:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  playground:
+    image: golang:1.25
+    working_dir: /workspace/flavors/postgres-redis
+    environment:
+      DELTAFLOW_PG_DSN: postgres://deltaflow:deltaflow@postgres:5432/deltaflow?sslmode=disable
+      DELTAFLOW_REDIS_ADDR: redis:6379
+      SIM_SEED: ${SIM_SEED:-4004}
+      USER_COUNT: ${USER_COUNT:-8}
+      CUSTOMER_COUNT: ${CUSTOMER_COUNT:-18}
+      ORDER_COUNT: ${ORDER_COUNT:-22}
+      MUTATION_COUNT: ${MUTATION_COUNT:-64}
+      WRITER_COUNT: ${WRITER_COUNT:-4}
+      WORKERS_CONCURRENCY: ${WORKERS_CONCURRENCY:-1}
+      WORKERS_BATCH_SIZE: ${WORKERS_BATCH_SIZE:-16}
+      WORKERS_MAX_ATTEMPTS: ${WORKERS_MAX_ATTEMPTS:-3}
+      DELTAFLOW_WORKER_LOG: ${DELTAFLOW_WORKER_LOG:-logs/deltaflow-worker.log}
+    volumes:
+      - ../../:/workspace
+      - gomodcache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["go", "run", "."]
+
+volumes:
+  pgdata:
+  gomodcache:

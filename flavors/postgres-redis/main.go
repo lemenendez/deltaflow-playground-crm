@@ -14,23 +14,23 @@ import (
 )
 
 const (
-	syncID          = "playground-crm-to-elasticsearch"
+	syncID          = "playground-crm-to-redis-metrics"
 	userProjection  = "CRMUserView"
 	custProjection  = "CRMCustomerView"
-	orderProjection = "CRMOrderFanout"
+	orderProjection = "CRMOrderMetricsFanout"
 )
 
 var (
-	seed                  = uint64(4004)
-	userCount             = 8
-	customerCount         = 18
-	orderCount            = 22
-	mutationCount         = 64
-	writerCount           = 4
-	workerConcurrency     = 2
-	workerBatchSize       = 8
-	workerMaxAttempts     = 3
-	elasticsearchEndpoint = ""
+	seed              = uint64(4004)
+	userCount         = 8
+	customerCount     = 18
+	orderCount        = 22
+	mutationCount     = 64
+	writerCount       = 4
+	workerConcurrency = 1
+	workerBatchSize   = 16
+	workerMaxAttempts = 3
+	redisAddress      = ""
 )
 
 var baseActorNames = []string{
@@ -125,6 +125,6 @@ func loadConfig() error {
 	if workerMaxAttempts <= 0 {
 		return fmt.Errorf("WORKERS_MAX_ATTEMPTS must be > 0")
 	}
-	elasticsearchEndpoint = os.Getenv("DELTAFLOW_ES_ENDPOINT")
+	redisAddress = os.Getenv("DELTAFLOW_REDIS_ADDR")
 	return nil
 }

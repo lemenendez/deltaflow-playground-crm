@@ -20,6 +20,7 @@ import (
 
 const elasticsearchIndex = "deltaflow_crm"
 const elasticsearchHTTPTimeout = 10 * time.Second
+const elasticsearchRefresh = "wait_for"
 
 func newCRMTarget(ctx context.Context, failOnce map[string]bool, deadLetters map[string]bool) (crmTarget, error) {
 	if elasticsearchEndpoint == "" {
@@ -39,32 +40,34 @@ type elasticsearchCRMTarget struct {
 	client   *http.Client
 	endpoint string
 	index    string
+	refresh  string
 	applier  *es.Applier
 
-	mu              sync.Mutex
-	searchQueue     []string
-	orderQueue      []string
-	failOnce        map[string]bool
-	deadLetters     map[string]bool
-	upserts         int
-	deletes         int
-	failures        int
+	mu          sync.Mutex
+	searchQueue []string
+	orderQueue  []string
+	failOnce    map[string]bool
+	deadLetters map[string]bool
+	upserts     int
+	deletes     int
+	failures    int
 }
 
 func newElasticsearchCRMTarget(endpoint, index string, failOnce map[string]bool, deadLetters map[string]bool) (*elasticsearchCRMTarget, error) {
 	client := &http.Client{Timeout: elasticsearchHTTPTimeout}
+	documentID := func(identity deltaflow.ProjectionIdentity) (string, error) {
+		id, err := hostpkg.StringFromKey(identity.Key, "id")
+		if err != nil {
+			return "", err
+		}
+		return string(identity.Type) + "/" + id, nil
+	}
 	applier, err := es.NewApplier(es.ApplierConfig{
-		Client:   client,
-		Endpoint: endpoint,
-		Index:    index,
-		DocumentID: func(identity deltaflow.ProjectionIdentity) (string, error) {
-			id, err := hostpkg.StringFromKey(identity.Key, "id")
-			if err != nil {
-				return "", err
-			}
-			return string(identity.Type) + "/" + id, nil
-		},
-		Refresh: "wait_for",
+		Client:     client,
+		Endpoint:   endpoint,
+		Index:      index,
+		DocumentID: documentID,
+		Refresh:    elasticsearchRefresh,
 	})
 	if err != nil {
 		return nil, err
@@ -73,6 +76,7 @@ func newElasticsearchCRMTarget(endpoint, index string, failOnce map[string]bool,
 		client:      client,
 		endpoint:    strings.TrimRight(endpoint, "/"),
 		index:       index,
+		refresh:     elasticsearchRefresh,
 		applier:     applier,
 		failOnce:    copyBoolMap(failOnce),
 		deadLetters: copyBoolMap(deadLetters),
@@ -133,13 +137,23 @@ func (t *elasticsearchCRMTarget) Apply(ctx context.Context, op deltaflow.Project
 		if t.deadLetters[queueKey] {
 			t.failures++
 			t.mu.Unlock()
-			return fmt.Errorf("crm target rejected %s: invalid downstream payload", queueKey)
+			return &es.ResponseError{
+				Operation:  op.Type,
+				StatusCode: http.StatusBadRequest,
+				Retryable:  false,
+				Body:       fmt.Sprintf("crm target rejected %s: invalid downstream payload", queueKey),
+			}
 		}
 		if t.failOnce[queueKey] {
 			delete(t.failOnce, queueKey)
 			t.failures++
 			t.mu.Unlock()
-			return fmt.Errorf("elasticsearch temporary timeout for %s", queueKey)
+			return &es.ResponseError{
+				Operation:  op.Type,
+				StatusCode: http.StatusTooManyRequests,
+				Retryable:  true,
+				Body:       fmt.Sprintf("elasticsearch temporary timeout for %s", queueKey),
+			}
 		}
 	}
 	t.mu.Unlock()
@@ -220,7 +234,13 @@ func (t *elasticsearchCRMTarget) indexURL() string {
 }
 
 func (t *elasticsearchCRMTarget) documentURL(documentID string) string {
-	return t.indexURL() + "/_doc/" + url.PathEscape(documentID) + "?refresh=wait_for"
+	base := t.indexURL() + "/_doc/" + url.PathEscape(documentID)
+	if t.refresh == "" {
+		return base
+	}
+	query := url.Values{}
+	query.Set("refresh", t.refresh)
+	return base + "?" + query.Encode()
 }
 
 func closeResponse(resp *http.Response) error {

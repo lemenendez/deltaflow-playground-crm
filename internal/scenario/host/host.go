@@ -20,13 +20,6 @@ import (
 	deltaflow "github.com/lemenendez/deltaflow/pkg/deltaflow"
 )
 
-type Stores struct {
-	DB            *sql.DB
-	DeltaStore    *pgstore.DeltaStore
-	JobStore      *pgstore.JobStore
-	DispatchStore *pgstore.DispatchStore
-}
-
 type OpenStoresOptions struct {
 	MaxAttempts int
 	LeaseLogger *slog.Logger
@@ -93,18 +86,20 @@ func EnvUint64(name string, defaultValue uint64) (uint64, error) {
 	return parsed, nil
 }
 
-func OpenStores(ctx context.Context, dsn string, maxAttempts int) (*Stores, error) {
+func OpenStores(ctx context.Context, dsn string, maxAttempts int) (*sql.DB, *pgstore.DeltaStore, *pgstore.JobStore, *pgstore.DispatchStore, error) {
 	return OpenStoresWithOptions(ctx, dsn, OpenStoresOptions{MaxAttempts: maxAttempts})
 }
 
-func OpenStoresWithOptions(ctx context.Context, dsn string, opts OpenStoresOptions) (*Stores, error) {
+// OpenStoresWithOptions wires official DeltaFlow Postgres connectors for playground usage.
+// It does not re-implement store behavior; it only opens DB and composes DeltaStore, JobStore, and DispatchStore.
+func OpenStoresWithOptions(ctx context.Context, dsn string, opts OpenStoresOptions) (*sql.DB, *pgstore.DeltaStore, *pgstore.JobStore, *pgstore.DispatchStore, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, nil, err
 	}
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	deltaStore := pgstore.NewDeltaStore(db, connectors.DeltaStoreConfig{})
@@ -114,12 +109,7 @@ func OpenStoresWithOptions(ctx context.Context, dsn string, opts OpenStoresOptio
 	})
 	dispatchStore := pgstore.NewDispatchStore(deltaStore, jobStore, pgstore.DispatchStoreConfig{})
 
-	return &Stores{
-		DB:            db,
-		DeltaStore:    deltaStore,
-		JobStore:      jobStore,
-		DispatchStore: dispatchStore,
-	}, nil
+	return db, deltaStore, jobStore, dispatchStore, nil
 }
 
 func OpenFileLogger(path string) (*FileLogger, error) {
@@ -154,21 +144,6 @@ func ResetSync(ctx context.Context, db *sql.DB, syncID deltaflow.SyncID) error {
 		return err
 	}
 	return nil
-}
-
-func MakeWorker(stores *Stores, syncID deltaflow.SyncID, workerID string, projector deltaflow.Projector, applier deltaflow.ProjectionApplier, pullSize int, batchSize int) *deltaflow.SyncWorker {
-	return &deltaflow.SyncWorker{
-		JobStore:   stores.JobStore,
-		Dispatcher: stores.DispatchStore,
-		Projector:  projector,
-		Applier:    applier,
-		SyncID:     syncID,
-		WorkerID:   workerID,
-		// Keep lease long enough for slower projector/applier paths (e.g. ES wait_for refresh).
-		LockFor:   30 * time.Second,
-		PullSize:  pullSize,
-		BatchSize: batchSize,
-	}
 }
 
 func RunWorkers(
