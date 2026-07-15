@@ -65,11 +65,11 @@ func printReport(result demoResult) {
 		fmt.Println("Redis result")
 	}
 	fmt.Printf("- Upserts: %d, deletes: %d, target failures observed: %d.\n", result.TargetUpserts, result.TargetDeletes, result.TargetFailures)
-	fmt.Printf("- Redis operation events: %d. Metrics refresh events: %d.\n", len(result.SearchQueue), len(result.OrderQueue))
+	fmt.Printf("- Order operation events: %d. Metrics refresh events: %d.\n", len(result.SearchQueue), len(result.OrderQueue))
 	if len(result.SearchDocs) > 0 {
 		fmt.Printf("- Redis metric keys: %d. Snapshot digest: %s.\n", len(result.SearchDocs), hostpkg.StableDigest(result.SearchDocs))
 	}
-	fmt.Printf("- Last redis operation events: %s.\n", queueTail(result.SearchQueue, 5))
+	fmt.Printf("- Last order operation events: %s.\n", queueTail(result.SearchQueue, 5))
 }
 
 func mutationBreakdown(events []mutation) map[string]int {
