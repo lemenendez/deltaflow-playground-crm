@@ -98,6 +98,11 @@ func runDemo(ctx context.Context, dsn string, makeWorker workerFactory) (demoRes
 	writersDone.Store(true)
 	if err != nil {
 		workerCancel()
+		select {
+		case <-workerStatsCh:
+		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
+		}
 		return demoResult{
 			Scenario:      scenario,
 			Enqueued:      writerResult.Enqueued,
